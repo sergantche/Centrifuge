@@ -5,6 +5,7 @@
 #include "sparse.h"
 #include "stdio.h"
 #include "params.h"
+#include "mkl_lapack.h"
 #include <math.h>
 #include <iostream>
 
@@ -49,6 +50,7 @@ Cell Conditions::Init_Conditions(double x, double y)
 
 double Conditions::Temp_Distribution(double z)
 {
+	//return 0;
 	//Linear distribution
 	return (5.0/T_0)*(1-(2*a*z)/La2);
 };
@@ -255,6 +257,11 @@ void Grid::Init()
 		B13[j]=(1/(U_2*(z[j+1] - z[j])))/(z_bottom[j+1]-z_bottom[j]);
 		B14[j]=(1/(U_2*(z[j+1] - z[j])))/(z_bottom[j+1]-z_bottom[j]);
 	};
+
+	//Allocate memory
+	int n = (z_num + 2) * (r_num + 2) * 5;
+	b.resize(n);
+	x.resize(n);
 };
 
 
@@ -321,7 +328,7 @@ void Grid::Output(const char *fname)
 {
 	FILE *fout = fopen(fname, "w");
 	fprintf(fout,"TITLE=%s\n","\"Data  TEST\"");
-    fprintf(fout,"VARIABLES=\"r\" \"z\" \"T\" \"u\" \"w\" \"v\" \"P\" \"pl\" \n");
+    fprintf(fout,"VARIABLES=\"r\" \"z\" \"u\" \"w\" \"v\" \"P\" \"T\" \"pl\" \n");
 	fprintf(fout,"ZONE T=\"  \"\nI=%d J=%d F=POINT\n",z_num+2,r_num+2);
     fprintf(fout,"DT=(SINGLE SINGLE SINGLE SINGLE SINGLE SINGLE SINGLE SINGLE)\n");
 
@@ -329,9 +336,10 @@ void Grid::Output(const char *fname)
     {
 		for (int j=0;j<=z_num+1;j++)
 		{ 
-			fprintf(fout,"%13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg\n", a*cells[i][j].r, a*cells[i][j].z, cells[i][j].T_True, cells[i][j].u_True, cells[i][j].w_True, cells[i][j].v_True, cells[i][j].P_True, cells[i][j].p_True);
+			fprintf(fout,"%13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg %13.5lg\n", a*cells[i][j].r, a*cells[i][j].z, cells[i][j].u_True, cells[i][j].w_True, cells[i][j].v_True, cells[i][j].P_True, cells[i][j].T_True, cells[i][j].p_True);
 		};
     }; 
+
 	//printf("%lf\n",cells[1][1].r);
 	/*
 	for (int i = 1; i<=r_num; i++) {
@@ -568,241 +576,6 @@ double Grid::W11(int i, int j)
 	return -dt*B8[j]/(Re*ny(cells[i][j].r));
 };
 
-void Grid::Find(double omega)
-{
-	//Amount of cells in grid
-	int N = (z_num+2) * (r_num+2);	
-	Sparse A(5*N);
-	//Construct initial guess
-	std::vector<double> X(5*N);
-	for (int i = 0; i<=r_num+1; i++) {
-		for (int j = 0; j<=z_num+1; j++) {			
-			X[nP(i,j)] = cells[i][j].P;
-			X[nT(i,j)] = cells[i][j].T;
-			X[nu(i,j)] = cells[i][j].u;
-			X[nw(i,j)] = cells[i][j].w;			
-			X[nv(i,j)] = cells[i][j].v;
-		};
-	};
-
-	//Construct system matrix
-	//Equations for inner cells
-	for (int i = 1; i<=r_num; i++) {
-		for (int j = 1; j<=z_num; j++) {
-			//Coefficients for equation for P
-			int line = nP(i,j);
-			A.set(line, nP(i,j), P1(i,j));
-			A.set(line, nT(i,j), P2(i,j));
-			A.set(line, nu(i+1,j), P3(i,j));
-			A.set(line, nu(i,j), P4(i,j));
-			A.set(line, nw(i,j+1), P5(i,j));
-			A.set(line, nw(i,j), P6(i,j));						
-			A.set_b(line, P0(i,j));
-			//Coefficients for equation for V
-			line = nv(i,j);
-			A.set(line, nv(i,j), V1(i,j));
-			A.set(line, nu(i,j), V2(i,j));
-			A.set(line, nu(i+1,j), V3(i,j));
-			A.set(line, nv(i+1,j), V4(i,j));
-			A.set(line, nv(i-1,j), V5(i,j));
-			A.set(line, nv(i,j+1), V6(i,j));
-			A.set(line, nv(i,j-1), V7(i,j));
-			A.set_b(line, V0(i,j));
-			//Coefficients for equation for T
-			line = nT(i,j);
-			A.set(line, nT(i,j), T1(i,j));
-			A.set(line, nu(i+1,j), T2(i,j));
-			A.set(line, nu(i,j), T3(i,j));
-			A.set(line, nT(i+1,j), T4(i,j));
-			A.set(line, nT(i-1,j), T5(i,j));
-			A.set(line, nT(i,j+1), T6(i,j));
-			A.set(line, nT(i,j-1), T7(i,j));
-			A.set_b(line, T0(i,j));
-			//Coefficients for equation for u
-			if (i != 1) {
-				line = nu(i,j);
-				A.set(line, nu(i,j), U1(i,j));
-				A.set(line, nP(i-1,j), U2(i,j));
-				A.set(line, nP(i,j), U3(i,j));
-				A.set(line, nv(i,j), U4(i,j));
-				A.set(line, nv(i-1,j), U5(i,j));
-				A.set(line, nT(i,j), U6(i,j));
-				A.set(line, nT(i-1,j), U7(i,j));
-				A.set(line, nu(i+1,j), U8(i,j));
-				A.set(line, nu(i-1,j), U9(i,j));
-				A.set(line, nu(i,j+1), U10(i,j));
-				A.set(line, nu(i,j-1), U11(i,j));
-				A.set_b(line, U0(i,j));
-			} else {
-				A.set(nu(1,j), nu(1,j), 1);
-				A.set_b(nu(1,j), 0);
-			};
-			double tmp = U7(1,1);
-			//Coefficients for equation for w
-			if (j != 1) {
-				line = nw(i,j);
-				A.set(line, nw(i,j), W1(i,j));
-				A.set(line, nP(i,j-1), W2(i,j));
-				A.set(line, nP(i,j), W3(i,j));
-				A.set(line, nu(i+1,j), W4(i,j));
-				A.set(line, nu(i,j), W5(i,j));
-				A.set(line, nu(i+1,j-1), W6(i,j));
-				A.set(line, nu(i,j-1), W7(i,j));
-				A.set(line, nw(i+1,j), W8(i,j));
-				A.set(line, nw(i-1,j), W9(i,j));
-				A.set(line, nw(i,j+1), W10(i,j));
-				A.set(line, nw(i,j-1), W11(i,j));
-				A.set_b(line, W0(i,j));
-			} else {
-				A.set(nw(i,1), nw(i,1), 1);
-				A.set_b(nw(i,1), 0);			
-			};	
-		};
-	};
-	//Equations for corner cells
-	//Just let them be equal zero
-	A.set(nP(0,0), nP(0,0), 1);
-	A.set(nT(0,0), nT(0,0), 1);
-	A.set(nu(0,0), nu(0,0), 1);
-	A.set(nw(0,0), nw(0,0), 1);
-	A.set(nv(0,0), nv(0,0), 1);
-
-	A.set(nP(0,z_num+1), nP(0,z_num+1), 1);
-	A.set(nT(0,z_num+1), nT(0,z_num+1), 1);
-	A.set(nu(0,z_num+1), nu(0,z_num+1), 1);
-	A.set(nw(0,z_num+1), nw(0,z_num+1), 1);
-	A.set(nv(0,z_num+1), nv(0,z_num+1), 1);	
-
-	A.set(nP(r_num+1,0), nP(r_num+1,0), 1);
-	A.set(nT(r_num+1,0), nT(r_num+1,0), 1);
-	A.set(nu(r_num+1,0), nu(r_num+1,0), 1);
-	A.set(nw(r_num+1,0), nw(r_num+1,0), 1);
-	A.set(nv(r_num+1,0), nv(r_num+1,0), 1);
-	
-	A.set(nP(r_num+1,z_num+1), nP(r_num+1,z_num+1), 1);
-	A.set(nT(r_num+1,z_num+1), nT(r_num+1,z_num+1), 1);
-	A.set(nu(r_num+1,z_num+1), nu(r_num+1,z_num+1), 1);
-	A.set(nw(r_num+1,z_num+1), nw(r_num+1,z_num+1), 1);
-	A.set(nv(r_num+1,z_num+1), nv(r_num+1,z_num+1), 1);
-	
-	//Equations for side cells. Applying boundary conditions.
-	int i , j;
-	//For left edge
-	i = 0;
-	for (j = 1; j<=z_num; j++) {
-		//P(0, j) = P(1, j)
-		A.set(nP(0,j), nP(0,j), 1);
-		A.set(nP(0,j), nP(1,j), -1);
-		//T(0, j) = T(1, j);
-		A.set(nT(0,j), nT(0,j), 1);
-		A.set(nT(0,j), nT(1,j), -1);
-		//
-		A.set(nw(0,j), nw(0,j), 1);
-		A.set(nw(0,j), nw(1,j), -1);
-		//
-		A.set(nv(0,j), nv(0,j), 1);
-		A.set(nv(0,j), nv(1,j), -1);
-		// u = 0
-		A.set(nu(i,j), nu(i,j), 1);
-		A.set_b(nu(i,j), 0);
-
-	};
-	//For rotor wall
-	i = r_num+1;
-	for (j = 1; j<=z_num; j++) {
-		//P(i, j) = P(i-1, j)
-		A.set(nP(i,j), nP(i,j), 1);
-		A.set(nP(i,j), nP(i-1,j), -1);
-		//T(0, j) = f(z)
-		A.set(nT(i,j), nT(i,j), 1);
-		A.set_b(nT(i,j), cond.Temp_Distribution(cells[i-1][j].z));
-		// w = u = v = 0
-		A.set(nu(i,j), nu(i,j), 1);
-		A.set_b(nu(i,j), 0);
-		A.set(nw(i,j), nw(i,j), 1);
-		A.set_b(nw(i,j), 0);
-		A.set(nv(i,j), nv(i,j), 1);
-		A.set_b(nv(i,j), 0);
-	};
-	//For bottom endcap
-	j = 0;
-	for (i = 1; i<=r_num; i++) {
-		//P(i, 0) = P(i, 1)
-		A.set(nP(i,0), nP(i,0), 1);
-		A.set(nP(i,0), nP(i,1), -1);
-		//T(i, 0) = f(0);
-		A.set(nT(i,0), nT(i,0), 1);
-		A.set_b(nT(i,0), cond.Temp_Distribution(0));
-		// w = u = v = 0
-		A.set(nu(i,j), nu(i,j), 1);
-		A.set_b(nu(i,j), 0);
-		// w = 0
-		A.set(nw(i,j), nw(i,j), 1);
-		A.set_b(nw(i,j), 0);
-		//
-		A.set(nv(i,j), nv(i,j), 1);
-		A.set_b(nv(i,j), 0);
-	};
-	//For top endcap
-	j = z_num+1;
-	for (i = 1; i<=r_num; i++) {
-		//P(i, j) = P(i, j-1)
-		A.set(nP(i,j), nP(i,j), 1);
-		A.set(nP(i,j), nP(i,j-1), -1);
-		//T(i, j) = f(Height);
-		A.set(nT(i,j), nT(i,j), 1);
-		A.set_b(nT(i,j), cond.Temp_Distribution(cond.Height));
-		// w = u = v = 0
-		A.set(nu(i,j), nu(i,j), 1);
-		A.set_b(nu(i,j), 0);
-		A.set(nw(i,j), nw(i,j), 1);
-		A.set_b(nw(i,j), 0);
-		A.set(nv(i,j), nv(i,j), 1);
-		A.set_b(nv(i,j), 0);
-	};
-
-	//Solve the system
-	x.resize(5*N, 0);
-
-	//Convert to sparse row format (CSR)
-	values.clear();
-	columns.clear();
-	rowIndex.clear();
-	int currentRowIndex = 1; // 1 based indexing
-	rowIndex.push_back(currentRowIndex);
-	for (int i = 0; i<5*N; i++) {		
-		for (std::map<int, double>::iterator it = A.matrix[i].begin(); it!=A.matrix[i].end(); it++) {
-				int j = it->first;
-				//Mat(i,j) = A.get(i,j);
-				values.push_back(A.get(i,j));
-				columns.push_back(j+1);
-				currentRowIndex++;
-			};
-		rowIndex.push_back(currentRowIndex);
-	};
-
-	// you fill right-hand side and initial guess
-	for (int i = 0; i<5*N; i++) b[i] = A.get_b(i);
-	for (int i = 0; i<5*N; i++) x[i] = X[i];
-
-	//
-	SolveSystem();
-	
-	//Write acquired values back to cells
-	for (int i = 0; i<5*N; i++) X[i] = x[i];
-	for (int i = 0; i<=r_num+1; i++)
-		for (int j = 0; j<=z_num+1; j++)
-		{
-			cells[i][j].P = X[nP(i,j)];
-			cells[i][j].T = X[nT(i,j)];
-			cells[i][j].u = X[nu(i,j)];
-			cells[i][j].w = X[nw(i,j)];
-			cells[i][j].v = X[nv(i,j)];
-		};
-
-	return;
-};
-
 void Grid::CalcMatrix() {
 	//Amount of cells in grid
 	int N = (z_num+2) * (r_num+2);	
@@ -986,9 +759,8 @@ void Grid::CalcMatrix() {
 };
 
 void Grid::CalcRightSide() {
-	//Amount of cells in grid
-	int N = (z_num+2) * (r_num+2);	
-	for (int i = 0; i<5*N; i++) b[i] = 0;
+	//Amount of cells in grid	
+	for (int i = 0; i < rowIndex.size() - 1; i++) b[i] = 0;
 	//Construct system matrix
 	//Equations for inner cells
 	for (int i = 1; i<=r_num; i++) {
@@ -1029,7 +801,7 @@ void Grid::CalcRightSide() {
 	//For rotor wall
 	i = r_num+1;
 	for (j = 1; j<=z_num; j++) {
-		b[nT(i,j)] = cond.Temp_Distribution(cells[i-1][j].z);
+		double val = b[nT(i,j)] = cond.Temp_Distribution(cells[i-1][j].z);
 		// w = u = v = 0
 		b[nu(i,j)] = 0;
 		b[nw(i,j)] = 0;
@@ -1063,8 +835,7 @@ void Grid::CalcRightSide() {
 int Grid::Step()
 {
 	int N = (z_num+2) * (r_num+2);	
-	//Solve the system
-	x.resize(5*N, 0);
+	//Solve the system	
 	for (int i = 0; i<=r_num+1; i++) {
 		for (int j = 0; j<=z_num+1; j++) {			
 			x[nP(i,j)] = cells[i][j].P;
@@ -1097,17 +868,6 @@ int Grid::Run2() {
 	printf("time step: %lf s; total_time: %.5lf s\n", real_dt, total_time);	
 	//Calc advanced time values
 	return Step();
-};
-
-//Computational cycle
-void Grid::Run(double omega)
-{
-	double real_dt = a*dt/om_a;
-	total_time += real_dt;
-	printf("time step: %lf s; total_time: %.5lf s\n", real_dt, total_time);		
-	//Calc advanced time values
-	Find(omega);
-	return;
 };
 
 void Grid::FinalCalc()
@@ -1250,9 +1010,8 @@ int Grid::SolveSystem() {
 
 	long long msglvl = 1; /* Print statistical information in file */
 	long long error = 0; /* Initialize error flag */
-
-	int N = (z_num+2) * (r_num+2);
-	long long n = 5*N; // Number of equations
+	
+	long long n = rowIndex.size() - 1; // Number of equations
 
 	long long* perm = new long long[n];
 
@@ -1287,11 +1046,7 @@ int Grid::SolveSystem() {
 	/* .. Back substitution and iterative refinement. */
 	/* -------------------------------------------------------------------- */
 	phase = 33;
-	iparm[7] = 2; /* Max numbers of iterative refinement steps. */
-	/* Set right hand side to one. */
-	for (int i = 0; i < n; i++) {
-		b[i] = 1;
-	}
+	iparm[7] = 2; /* Max numbers of iterative refinement steps. */		
 	pardiso_64(pt, &maxfct, &mnum, &mtype, &phase,
 		&n, values.data(), rowIndex.data(), columns.data(), perm, &nrhs, iparm, &msglvl, b.data(), x.data(), &error);
 	if (error != 0) {
@@ -1312,4 +1067,10 @@ int Grid::SolveSystem() {
 		&n, values.data(), rowIndex.data(), columns.data(), perm, &nrhs, iparm, &msglvl, b.data(), x.data(), &error);	
 
 	return error;
+};
+
+double Grid::CalcConditionNumber() {
+	double estimate = 0;
+	//dgecon("1", 
+	return estimate;
 };

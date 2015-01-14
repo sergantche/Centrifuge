@@ -100,6 +100,7 @@ public:
 	std::vector<long long> columns;
 	std::vector<long long> rowIndex;
 	void CalcMatrix();
+	double CalcConditionNumber();
 	//Vector of variables
 	std::vector<double> x;
 	//Right side
@@ -124,10 +125,7 @@ public:
 	int SolveSystem();
 
 	//Calculations
-	double eps;
-	void Find(double);
-	//Computation cycle
-	void Run(double);
+	double eps;		
 	//Calculate norm
 	double Get_Norm();
 	//For not demensionless variables
