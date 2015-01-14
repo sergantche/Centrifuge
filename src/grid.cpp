@@ -50,9 +50,9 @@ Cell Conditions::Init_Conditions(double x, double y)
 
 double Conditions::Temp_Distribution(double z)
 {
-	//return 0;
+	return 0;
 	//Linear distribution
-	return (5.0/T_0)*(1-(2*a*z)/La2);
+	//return (5.0/T_0)*(1-(2*a*z)/La2);
 };
 
 double Conditions::V_boundary(int i, int j) {
@@ -825,7 +825,8 @@ void Grid::CalcRightSide() {
 		// w = u = v = 0		
 		b[nu(i,j)] = 0;		
 		b[nw(i,j)] = 0;		
-		b[nv(i,j)] = 0;
+		double dv = om_a * deltaOmegaTop / cells[i][j].r;
+		b[nv(i,j)] = -dv;
 	};
 	// you fill right-hand side and initial guess	
 
